@@ -401,6 +401,12 @@ class Game:
                         self.snake.direction = RIGHT
                 elif self.state == PAUSE and event.key == pygame.K_ESCAPE:
                     self.state = GAME
+
+            # 处理滑块事件
+            if self.state == PAUSE:
+                if self.speed_slider.handle_event(event):
+                    self.game_speed = int(self.speed_slider.value)
+
         return True
         
     def update(self):
@@ -782,7 +788,7 @@ def main():
     pygame.init()
     pygame.font.init()
     
-    # 创游戏窗口
+    # ���游戏窗口
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption('贪吃蛇游戏')
     
