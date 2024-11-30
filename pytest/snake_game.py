@@ -24,6 +24,10 @@ GREEN = (0, 255, 0)
 BLACK = (0, 0, 0)
 GRAY = (128, 128, 128)  # 障碍物颜色
 YELLOW = (255, 255, 0)  # 蛇头颜色
+BLUE = (0, 0, 255)       # 加速食物
+PURPLE = (128, 0, 128)   # 减速食物
+PINK = (255, 192, 203)   # 缩短食物
+ORANGE = (255, 165, 0)   # 无敌食物
 
 # 方向常量
 UP = (0, -1)
@@ -31,21 +35,16 @@ DOWN = (0, 1)
 LEFT = (-1, 0)
 RIGHT = (1, 0)
 
-def get_font():
+def get_font(size=20):
     """获取系统中文字体"""
-    # 获取系统默认字体
     system_fonts = pygame.font.get_fonts()
-    
-    # 优先选择的中文字体列表
     chinese_fonts = ['simhei', 'simsun', 'microsoftyahei', 'dengxian']
     
-    # 查找可用的中文字体
     for font in chinese_fonts:
         if font in system_fonts:
-            return pygame.font.SysFont(font, FONT_SIZE)
+            return pygame.font.SysFont(font, size)
     
-    # 如果没有找到中文字体，返回默认字体
-    return pygame.font.Font(None, FONT_SIZE)
+    return pygame.font.Font(None, size)
 
 class Button:
     def __init__(self, x, y, width, height, text, color):
@@ -66,18 +65,42 @@ class Button:
 class Obstacle:
     def __init__(self, screen):
         self.screen = screen
-        self.positions = set()  # 使用集合存储障碍物位置
+        self.positions = set()  # 用集合存储障碍物位置
         self.color = GRAY
         
-    def generate(self, snake_pos, food_pos, count=20):
+    def generate(self, snake_pos, food_pos, border_holes, count=20):
         """生成随机障碍物
         
         Args:
             snake_pos: 蛇的初始位置
             food_pos: 食物的位置
+            border_holes: 边框洞口位置
             count: 障碍物数量
         """
         self.positions.clear()
+        
+        # 添加墙壁作为障碍物
+        for x in range(GRID_WIDTH):
+            self.positions.add((x, 0))  # 顶部墙壁
+            self.positions.add((x, GRID_HEIGHT - 1))  # 底部墙壁
+        for y in range(GRID_HEIGHT):
+            self.positions.add((0, y))  # 左侧墙壁
+            self.positions.add((GRID_WIDTH - 1, y))  # 右侧墙壁
+        
+        # 移除洞口位置的墙壁
+        for side, pos, size in border_holes:
+            if side == 'top':
+                for x in range(pos - size // (2 * GRID_SIZE), pos + size // (2 * GRID_SIZE)):
+                    self.positions.discard((x, 0))
+            elif side == 'bottom':
+                for x in range(pos - size // (2 * GRID_SIZE), pos + size // (2 * GRID_SIZE)):
+                    self.positions.discard((x, GRID_HEIGHT - 1))
+            elif side == 'left':
+                for y in range(pos - size // (2 * GRID_SIZE), pos + size // (2 * GRID_SIZE)):
+                    self.positions.discard((0, y))
+            elif side == 'right':
+                for y in range(pos - size // (2 * GRID_SIZE), pos + size // (2 * GRID_SIZE)):
+                    self.positions.discard((GRID_WIDTH - 1, y))
         
         # 定义蛇头周围的安全区域
         safe_zone = set()
@@ -95,9 +118,9 @@ class Obstacle:
         attempts = 0
         max_attempts = 1000  # 防止无限循环
         
-        while len(self.positions) < count and attempts < max_attempts:
-            pos = (random.randint(0, GRID_WIDTH-1), 
-                  random.randint(0, GRID_HEIGHT-1))
+        while len(self.positions) < count + 2 * (GRID_WIDTH + GRID_HEIGHT) and attempts < max_attempts:
+            pos = (random.randint(1, GRID_WIDTH-2), 
+                  random.randint(1, GRID_HEIGHT-2))
             
             # 确保障碍物不会生成在：
             # 1. 蛇的位置
@@ -162,6 +185,99 @@ class Slider:
             return True
         return False
 
+class Border:
+    def __init__(self, screen):
+        self.screen = screen
+        self.holes = []  # 存储洞口位置
+        self.color = WHITE
+        self.thickness = 6
+
+    def generate_holes(self, difficulty):
+        """生成随机洞口
+        Args:
+            difficulty: 游戏难度
+        """
+        self.holes = []
+        sides = ['top', 'right', 'bottom', 'left']
+        random.shuffle(sides)
+        
+        if difficulty == "easy":
+            num_holes = 4
+            large_hole_prob = 0.5
+        elif difficulty == "medium":
+            num_holes = 3
+            large_hole_prob = 0.3
+        else:  # hard
+            num_holes = 2
+            large_hole_prob = 0.2
+        
+        selected_sides = sides[:num_holes]
+        
+        for side in selected_sides:
+            if random.random() < large_hole_prob:
+                size = GRID_SIZE * 5
+            else:
+                size = GRID_SIZE * 3
+            
+            if side == 'top':
+                x = random.randint(1, GRID_WIDTH-2)
+                self.holes.append(('top', x, size))
+                self.holes.append(('bottom', x, size))  # 对应底部洞口
+            elif side == 'right':
+                y = random.randint(1, GRID_HEIGHT-2)
+                self.holes.append(('right', y, size))
+                self.holes.append(('left', y, size))  # 对应左侧洞口
+            elif side == 'bottom':
+                x = random.randint(1, GRID_WIDTH-2)
+                self.holes.append(('bottom', x, size))
+                self.holes.append(('top', x, size))  # 对应顶部洞口
+            elif side == 'left':
+                y = random.randint(1, GRID_HEIGHT-2)
+                self.holes.append(('left', y, size))
+                self.holes.append(('right', y, size))  # 对应右侧洞口
+    
+    def render(self):
+        """绘制边框和洞口"""
+        lines = [
+            ((0, 0), (WINDOW_WIDTH, 0)),
+            ((WINDOW_WIDTH-self.thickness, 0), (WINDOW_WIDTH-self.thickness, WINDOW_HEIGHT)),
+            ((0, WINDOW_HEIGHT-self.thickness), (WINDOW_WIDTH, WINDOW_HEIGHT-self.thickness)),
+            ((0, 0), (0, WINDOW_HEIGHT))
+        ]
+        
+        for start, end in lines:
+            pygame.draw.line(self.screen, self.color, start, end, self.thickness)
+        
+        for side, pos, size in self.holes:
+            if side == 'top':
+                pygame.draw.rect(self.screen, BLACK,
+                               (pos * GRID_SIZE - size//2, 0,
+                                size, self.thickness))
+                pygame.draw.rect(self.screen, YELLOW,
+                               (pos * GRID_SIZE - size//2, 0,
+                                size, self.thickness), 2)
+            elif side == 'right':
+                pygame.draw.rect(self.screen, BLACK,
+                               (WINDOW_WIDTH-self.thickness, pos * GRID_SIZE - size//2,
+                                self.thickness, size))
+                pygame.draw.rect(self.screen, YELLOW,
+                               (WINDOW_WIDTH-self.thickness, pos * GRID_SIZE - size//2,
+                                self.thickness, size), 2)
+            elif side == 'bottom':
+                pygame.draw.rect(self.screen, BLACK,
+                               (pos * GRID_SIZE - size//2, WINDOW_HEIGHT-self.thickness,
+                                size, self.thickness))
+                pygame.draw.rect(self.screen, YELLOW,
+                               (pos * GRID_SIZE - size//2, WINDOW_HEIGHT-self.thickness,
+                                size, self.thickness), 2)
+            elif side == 'left':
+                pygame.draw.rect(self.screen, BLACK,
+                               (0, pos * GRID_SIZE - size//2,
+                                self.thickness, size))
+                pygame.draw.rect(self.screen, YELLOW,
+                               (0, pos * GRID_SIZE - size//2,
+                                self.thickness, size), 2)
+
 class Game:
     def __init__(self, screen, game_font):
         self.screen = screen
@@ -171,10 +287,13 @@ class Game:
         self.food = Food(screen)
         self.obstacle = Obstacle(screen)
         self.difficulty = None  # 新增难度属性
+        self.border = Border(screen)  # 添加边框
         
         # 创建主菜单按钮
         self.start_button = Button(WINDOW_WIDTH//2 - 100, WINDOW_HEIGHT//2 - 25,
                                  200, 50, "开始游戏", GREEN)
+        self.instructions_button = Button(WINDOW_WIDTH//2 - 100, WINDOW_HEIGHT//2 + 50,
+                                          200, 50, "游戏说明", BLUE)
         
         # 创建难度选择按钮
         button_width = 150
@@ -186,7 +305,7 @@ class Game:
                                 button_width, 50, "简单", GREEN)
         self.medium_button = Button(start_x + button_width + button_spacing,
                                   WINDOW_HEIGHT//2 - 25,
-                                  button_width, 50, "中等", YELLOW)
+                                  button_width, 50, "中", YELLOW)
         self.hard_button = Button(start_x + 2 * (button_width + button_spacing),
                                 WINDOW_HEIGHT//2 - 25,
                                 button_width, 50, "困难", RED)
@@ -204,11 +323,14 @@ class Game:
         self.speed_slider = Slider(WINDOW_WIDTH//4, WINDOW_HEIGHT//2 + 80, 
                                  WINDOW_WIDTH//2, 10, 5, 20, 10)
         self.game_speed = 10  # 初始游戏速度
+        
+        self.instructions_font = get_font(18)  # 使用较小的字体
     
     def start_new_game(self):
         """开始新游戏时初始化所有元素"""
         self.snake.reset()
         self.food.randomize_position()
+        self.border.generate_holes(self.difficulty)  # 根据难度生成洞口
         
         # 根据难度设置障碍物数量
         obstacle_count = {
@@ -219,35 +341,23 @@ class Game:
         
         self.obstacle.generate([self.snake.get_head_position()],
                              self.food.position,
+                             self.border.holes,
                              count=obstacle_count)
     
     def handle_events(self):
         for event in pygame.event.get():
-            # 首先处理滑块事件（如果在暂停状态）
-            if self.state == PAUSE:
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    mouse_pos = pygame.mouse.get_pos()
-                    if self.speed_slider.handle_rect.collidepoint(mouse_pos):
-                        self.speed_slider.dragging = True
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    self.speed_slider.dragging = False
-                elif event.type == pygame.MOUSEMOTION and self.speed_slider.dragging:
-                    mouse_pos = pygame.mouse.get_pos()
-                    x = min(max(mouse_pos[0], self.speed_slider.rect.x), 
-                           self.speed_slider.rect.right - self.speed_slider.handle_width)
-                    ratio = (x - self.speed_slider.rect.x) / (self.speed_slider.rect.width - self.speed_slider.handle_width)
-                    self.speed_slider.value = self.speed_slider.min_val + ratio * (self.speed_slider.max_val - self.speed_slider.min_val)
-                    self.game_speed = int(self.speed_slider.value)
-
             if event.type == pygame.QUIT:
                 return False
                 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
                 
-                if self.state == MENU and self.start_button.is_clicked(mouse_pos):
-                    self.state = DIFFICULTY
-                    
+                if self.state == MENU:
+                    if self.start_button.is_clicked(mouse_pos):
+                        self.state = DIFFICULTY
+                    elif self.instructions_button.is_clicked(mouse_pos):
+                        self.state = "instructions"
+                
                 elif self.state == DIFFICULTY:
                     if self.easy_button.is_clicked(mouse_pos):
                         self.difficulty = "easy"
@@ -263,8 +373,8 @@ class Game:
                         self.start_new_game()
                 
                 elif self.state == GAME_OVER and self.restart_button.is_clicked(mouse_pos):
-                    self.state = DIFFICULTY  # 返回难度选择界面
-                    self.difficulty = None   # 重置难度设置
+                    self.state = DIFFICULTY
+                    self.difficulty = None
                 
                 elif self.state == PAUSE:
                     if self.continue_button.is_clicked(mouse_pos):
@@ -274,8 +384,12 @@ class Game:
                         self.difficulty = None
             
             if event.type == pygame.KEYDOWN:
-                if self.state == GAME:
-                    if event.key == pygame.K_ESCAPE:  # ESC键暂停游戏
+                if self.state == "instructions" and event.key == pygame.K_ESCAPE:
+                    self.state = MENU
+                elif self.state == DIFFICULTY and event.key == pygame.K_ESCAPE:
+                    self.state = MENU
+                elif self.state == GAME:
+                    if event.key == pygame.K_ESCAPE:
                         self.state = PAUSE
                     elif event.key == pygame.K_UP and self.snake.direction != DOWN:
                         self.snake.direction = UP
@@ -286,37 +400,106 @@ class Game:
                     elif event.key == pygame.K_RIGHT and self.snake.direction != LEFT:
                         self.snake.direction = RIGHT
                 elif self.state == PAUSE and event.key == pygame.K_ESCAPE:
-                    self.state = GAME  # ESC键继续游戏
+                    self.state = GAME
         return True
         
     def update(self):
         if self.state == GAME:
-            if not self.snake.update():  # 如果蛇撞到自己或边界
+            head_pos = self.snake.get_head_position()
+            
+            for side, pos, size in self.border.holes:
+                if side == 'left' and head_pos[0] < 0:
+                    if abs(head_pos[1] - pos) < size // GRID_SIZE:
+                        new_y = pos
+                        self.snake.positions = [(GRID_WIDTH - 1, new_y)] + self.snake.positions[:-1]
+                        return
+                elif side == 'right' and head_pos[0] >= GRID_WIDTH:
+                    if abs(head_pos[1] - pos) < size // GRID_SIZE:
+                        new_y = pos
+                        self.snake.positions = [(0, new_y)] + self.snake.positions[:-1]
+                        return
+                elif side == 'top' and head_pos[1] < 0:
+                    if abs(head_pos[0] - pos) < size // GRID_SIZE:
+                        new_x = pos
+                        self.snake.positions = [(new_x, GRID_HEIGHT - 1)] + self.snake.positions[:-1]
+                        return
+                elif side == 'bottom' and head_pos[1] >= GRID_HEIGHT:
+                    if abs(head_pos[0] - pos) < size // GRID_SIZE:
+                        new_x = pos
+                        self.snake.positions = [(new_x, 0)] + self.snake.positions[:-1]
+                        return
+            
+            if not self.snake.update():
                 self.state = GAME_OVER
-            # 检查是否撞到障碍物
+            
             if self.obstacle.is_collision(self.snake.get_head_position()):
-                self.state = GAME_OVER
-            # 检查是否吃到食物
-            if self.snake.get_head_position() == self.food.position:
-                self.snake.length += 1
-                self.snake.score += 1
-                # 确保新的食物不会出现在障碍物或蛇身上
+                if not self.snake.invincible:
+                    self.state = GAME_OVER
+            
+            head_pos = self.snake.get_head_position()
+            food_size = int(self.food.current_size // GRID_SIZE)
+            
+            food_area = [(self.food.position[0] + dx, self.food.position[1] + dy)
+                        for dx in range(food_size)
+                        for dy in range(food_size)]
+            
+            if head_pos in food_area:
+                score = self.food.food_types[self.food.current_type]['effect'](self)
+                self.snake.score += score
                 while True:
                     self.food.randomize_position()
-                    if (not self.obstacle.is_collision(self.food.position) and 
-                        self.food.position not in self.snake.positions):
+                    food_size = int(self.food.current_size // GRID_SIZE)
+                    new_food_area = [(self.food.position[0] + dx, self.food.position[1] + dy)
+                                   for dx in range(food_size)
+                                   for dy in range(food_size)]
+                    if not any(self.obstacle.is_collision(pos) for pos in new_food_area) and \
+                       not any(pos in self.snake.positions for pos in new_food_area):
                         break
     
+    def render_instructions(self):
+        """绘制游戏说明"""
+        instructions = [
+            ("游戏说明", WHITE),
+            ("", WHITE),
+            ("控制蛇移动，吃掉食物，避免撞到墙壁和障碍物。", WHITE),
+            ("", WHITE),
+            ("食物类型：", WHITE),
+            ("  红色方块: 普通食物，增加1长度", RED),
+            ("  蓝色方块: 加速食物，增加速度", BLUE),
+            ("  紫色方块: 减速食物，降低速度", PURPLE),
+            ("  粉色方块: 缩短食物，减少长度", PINK),
+            ("  橙色方块: 无敌食物，获得短暂无敌", ORANGE),
+            ("  大红色方块: 增加更多长度，大小随机", RED),
+            ("", WHITE),
+            ("边框和洞口：", WHITE),
+            ("  黄色标记: 洞口，蛇可以穿过", YELLOW),
+            ("", WHITE),
+            ("按ESC键暂停游戏，调整速度或返回主菜单。", WHITE)
+        ]
+        
+        y_offset = WINDOW_HEIGHT // 12  # 将说明再上移
+        for text, color in instructions:
+            instruction_text = self.instructions_font.render(text, True, color)
+            instruction_rect = instruction_text.get_rect(center=(WINDOW_WIDTH//2, y_offset))
+            self.screen.blit(instruction_text, instruction_rect)
+            y_offset += 35  # 调整行间距
+
     def render(self):
         self.screen.fill(BLACK)
         
         if self.state == MENU:
-            # 绘制游戏标题
             title_text = self.game_font.render("贪吃蛇游戏", True, WHITE)
             title_rect = title_text.get_rect(center=(WINDOW_WIDTH//2, WINDOW_HEIGHT//3))
             self.screen.blit(title_text, title_rect)
             self.start_button.draw(self.screen)
-            
+            self.instructions_button.draw(self.screen)
+        
+        elif self.state == "instructions":
+            self.render_instructions()
+            back_text = self.game_font.render("按ESC返回主菜单", True, WHITE)
+            back_rect = back_text.get_rect(center=(WINDOW_WIDTH//2, WINDOW_HEIGHT - 50))
+            self.screen.blit(back_text, back_rect)
+        
         elif self.state == DIFFICULTY:
             # 绘制难度选择标题
             title_text = self.game_font.render("选择难度", True, WHITE)
@@ -334,6 +517,7 @@ class Game:
             self.hard_button.draw(self.screen)
             
         elif self.state == GAME:
+            self.border.render()  # 绘制边框和洞口
             self.obstacle.render()  # 先绘制障碍物
             self.snake.render()     # 再绘制蛇
             self.food.render()      # 最后绘制食物
@@ -391,24 +575,28 @@ class Snake:
         self.color = GREEN
         self.head_color = YELLOW
         self.score = 0
+        self.invincible = False
+        self.invincible_time = 0
+        self.invincible_duration = 5000  # 无敌时间5秒
 
     def get_head_position(self):
         return self.positions[0]
 
     def update(self):
+        # 更新无敌状态
+        if self.invincible and pygame.time.get_ticks() - self.invincible_time > self.invincible_duration:
+            self.invincible = False
+
         cur = self.get_head_position()
         x, y = self.direction
         new_x = cur[0] + x
         new_y = cur[1] + y
         
-        # 检查是否到边界
-        if new_x < 0 or new_x >= GRID_WIDTH or new_y < 0 or new_y >= GRID_HEIGHT:
-            return False
-            
+        # 移除边界检查，让 Game 类来处理边界情况
         new = (new_x, new_y)
-        # 检查是否撞到自己
+        # 只检查是否撞到自己
         if new in self.positions[3:]:
-            return False
+            return False if not self.invincible else True
             
         self.positions.insert(0, new)
         if len(self.positions) > self.length:
@@ -464,24 +652,137 @@ class Food:
     def __init__(self, screen):
         self.screen = screen
         self.position = (0, 0)
-        self.color = RED
+        self.size_range = {
+            'small': GRID_SIZE,
+            'medium': GRID_SIZE * 1.5,
+            'large': GRID_SIZE * 2
+        }
+        self.current_size = self.size_range['small']
+        
+        self.food_types = {
+            'normal': {
+                'color': RED,
+                'probability': 0.5,
+                'score': 1,
+                'effect': self.normal_effect
+            },
+            'big_red': {
+                'color': RED,
+                'probability': 0.1,
+                'score': 3,
+                'effect': self.big_red_effect
+            },
+            'speed_up': {
+                'color': BLUE,
+                'probability': 0.1,
+                'score': 2,
+                'effect': self.speed_up_effect
+            },
+            'speed_down': {
+                'color': PURPLE,
+                'probability': 0.1,
+                'score': 2,
+                'effect': self.speed_down_effect
+            },
+            'invincible': {
+                'color': ORANGE,
+                'probability': 0.05,
+                'score': 5,
+                'effect': self.invincible_effect
+            },
+            'reverse': {
+                'color': (255, 165, 0),
+                'probability': 0.05,
+                'score': 3,
+                'effect': self.reverse_effect
+            },
+            'bonus': {
+                'color': (255, 215, 0),
+                'probability': 0.05,
+                'score': 10,
+                'effect': self.bonus_effect
+            }
+        }
+        self.current_type = 'normal'
+        self.color = self.food_types['normal']['color']
         self.randomize_position()
 
     def randomize_position(self):
-        self.position = (random.randint(0, GRID_WIDTH-1), 
-                        random.randint(0, GRID_HEIGHT-1))
+        size_in_grid = int(self.current_size // GRID_SIZE)
+        max_x = GRID_WIDTH - size_in_grid
+        max_y = GRID_HEIGHT - size_in_grid
+        
+        self.position = (random.randint(0, max_x), random.randint(0, max_y))
+        
+        rand = random.random()
+        cumulative_prob = 0
+        for food_type, properties in self.food_types.items():
+            cumulative_prob += properties['probability']
+            if rand <= cumulative_prob:
+                self.current_type = food_type
+                self.color = properties['color']
+                break
+        
+        if self.current_type == 'big_red':
+            self.current_size = random.choice(list(self.size_range.values()))
+        else:
+            self.current_size = self.size_range['small']
 
     def render(self):
+        size = int(self.current_size)
         pygame.draw.rect(self.screen, self.color,
                         (self.position[0] * GRID_SIZE, 
-                         self.position[1] * GRID_SIZE, GRID_SIZE, GRID_SIZE))
+                         self.position[1] * GRID_SIZE,
+                         size, size))
+        
+        if self.current_type != 'normal':
+            if pygame.time.get_ticks() % 1000 < 500:
+                pygame.draw.rect(self.screen, WHITE,
+                               (self.position[0] * GRID_SIZE, 
+                                self.position[1] * GRID_SIZE,
+                                size, size), 2)
+
+    def reverse_effect(self, game):
+        game.snake.positions.reverse()
+        game.snake.direction = (-game.snake.direction[0], -game.snake.direction[1])
+        return self.food_types[self.current_type]['score']
+
+    def bonus_effect(self, game):
+        return self.food_types[self.current_type]['score']
+
+    def normal_effect(self, game):
+        game.snake.length += 1
+        return self.food_types[self.current_type]['score']
+
+    def speed_up_effect(self, game):
+        game.game_speed = min(20, game.game_speed + 2)
+        game.snake.length += 1
+        return self.food_types[self.current_type]['score']
+
+    def speed_down_effect(self, game):
+        game.game_speed = max(5, game.game_speed - 2)
+        game.snake.length += 1
+        return self.food_types[self.current_type]['score']
+
+    def invincible_effect(self, game):
+        game.snake.invincible = True
+        game.snake.invincible_time = pygame.time.get_ticks()
+        game.snake.length += 1
+        return self.food_types[self.current_type]['score']
+
+    def big_red_effect(self, game):
+        # 根据食物大小增加蛇的长度
+        size_multiplier = self.current_size / GRID_SIZE
+        length_increase = int(size_multiplier * 3)  # 基础增长3格
+        game.snake.length += length_increase
+        return self.food_types[self.current_type]['score'] * int(size_multiplier)
 
 def main():
     # 初始化Pygame
     pygame.init()
     pygame.font.init()
     
-    # 创建游戏窗口
+    # 创游戏窗口
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption('贪吃蛇游戏')
     
